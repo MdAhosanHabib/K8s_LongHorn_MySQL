@@ -1,0 +1,248 @@
+###################################
+# LongHorn storage Install in K8s #
+###################################
+--------------------------------------------------------------------------------
+https://longhorn.io/docs/1.5.1/deploy/install/install-with-kubectl/
+https://technekey.com/how-to-setup-longhorn-block-storage-for-kubernetes-cluster/
+--------------------------------------------------------------------------------
+#### on workernode 1 & 2 and 3 add 40GB hard-disk
+[root@worker1 ~]# lsblk
+NAME               MAJ:MIN RM  SIZE RO TYPE MOUNTPOINTS
+sr0                 11:0    1  8.6G  0 rom
+nvme0n1            259:0    0   80G  0 disk
+├─nvme0n1p1        259:1    0    1G  0 part /boot
+└─nvme0n1p2        259:2    0   79G  0 part
+  └─almalinux-root 253:0    0   79G  0 lvm  /
+nvme0n2            259:3    0   40G  0 disk
+[root@worker1 ~]#
+
+sudo parted /dev/nvme0n2 mklabel gpt
+sudo parted /dev/nvme0n2 mkpart primary ext4 1MiB 100%
+
+sudo mkfs.ext4 /dev/nvme0n2p1
+sudo mkdir /var/lib/longhorn
+
+echo '/dev/nvme0n2p1  /var/lib/longhorn  ext4  defaults  0  0' | sudo tee -a /etc/fstab
+
+mount -a
+systemctl daemon-reload
+df -h /var/lib/longhorn
+df -hTP
+#  /dev/nvme0n2p1             ext4       40G   24K   38G   1% /var/lib/longhorn
+sudo reboot
+df -hTP
+
+[root@master1 ~]# kubectl version
+Client Version: v1.28.1
+Kustomize Version: v5.0.4-0.20230601165947-6ce0bf390ce3
+Server Version: v1.28.1
+[root@master1 ~]#
+
+[root@worker2 ~]# docker version
+containerd:
+  Version:          1.6.22
+  GitCommit:        8165feabfdfe38c65b599c4993d227328c231fca
+
+[root@master1 storage]# dnf install git -y #all master and worker
+dnf install git -y
+dnf install nfs-utils -y
+dnf install iscsi-initiator-utils -y
+dnf install wget -y
+systemctl enable iscsid
+[root@master1 storage]# mkdir -p /k8s/storage/longhorn
+[root@master1 storage]# cd /k8s/storage/longhorn
+[root@master1 storage]# wget https://github.com/longhorn/longhorn/blob/v1.5.1/scripts/environment_check.sh
+
+[root@master1 storage]# chmod +x environment_check.sh
+[root@master1 storage]# ll
+total 88
+-rwxr-xr-x. 1 root root 88534 Sep  3 11:40 environment_check.sh
+[root@master1 storage]# bash environment_check.sh
+
+--if need
+[root@master1 storage]# git clone https://github.com/longhorn/longhorn.git
+[root@master1 storage]# cd /k8s/storage/longhorn/longhorn/deploy
+
+wget https://raw.githubusercontent.com/longhorn/longhorn/v1.5.1/deploy/longhorn.yaml
+[root@master1 deploy]# kubectl apply -f longhorn.yaml
+
+kubectl get pods --namespace longhorn-system --watch
+
+--for search error
+kubectl -n longhorn-system logs -l app=longhorn-manager-b6w8f
+
+kubectl get deployments.apps -n longhorn-system
+kubectl get daemonsets.apps -n longhorn-system
+
+[root@master1 storage]# kubectl get pods -n longhorn-system
+[root@master1 storage]# kubectl get svc -n longhorn-system
+
+[root@master1 longhorn]# vi ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: longhorn-ingress
+  namespace: longhorn-system
+spec:
+  ingressClassName: "nginx"
+  rules:
+  - http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: longhorn-frontend
+            port:
+              number: 80
+
+[root@master1 longhorn]# dnf install net-tools -y
+[root@master1 longhorn]# dnf install telnet -y
+[root@master1 longhorn]# kubectl apply -f ingress.yaml
+
+[root@master1 longhorn]# kubectl get ingress -n longhorn-system
+NAME               CLASS   HOSTS   ADDRESS   PORTS   AGE
+longhorn-ingress   nginx   *                 80      15m
+[root@master1 longhorn]#
+
+[root@master1 longhorn]# kubectl port-forward svc/longhorn-frontend 8080:80 -n longhorn-system --address 0.0.0.0
+Forwarding from 0.0.0.0:8080 -> 8000
+
+--other terminals
+[root@master1 ~]# telnet 192.168.141.128 8080
+Trying 192.168.141.128...
+Connected to 192.168.141.128.
+
+http://192.168.141.128:8080
+
+
+
+
+##########################
+# PVC, PV & MySQL deploy #
+##########################
+--------------------------------------------------------------------------------
+https://www.tutorialspoint.com/deploying-mysql-on-kubernetes-guide
+--------------------------------------------------------------------------------
+-- in  k8s prod should "accessModes: - ReadWriteOnce"
+[root@master1 longhorn]# pwd
+/k8s/storage/longhorn
+[root@master1 longhorn]# cat mysql-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-pvc
+spec:
+  accessModes:
+    - ReadWriteMany
+  storageClassName: longhorn
+  resources:
+    requests:
+      storage: 10Gi
+
+--it is not need
+[root@master1 longhorn]#
+[root@master1 longhorn]# cat mysql-pv.yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mysql-pv
+  labels:
+    type: local
+spec:
+  capacity:
+    storage: 10Gi
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: longhorn
+  persistentVolumeReclaimPolicy: Retain
+  csi:
+    driver: longhorn
+    volumeHandle: pvc-8c9b069b-d2ed-4623-991e-687d603edd3a
+    volumeAttributes: {}
+
+-- in  k8s prod should "spec: replicas: 1"
+[root@master1 longhorn]#
+[root@master1 longhorn]# cat mysql.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mysql
+  template:
+    metadata:
+      labels:
+        app: mysql
+    spec:
+      containers:
+      - image: mysql:8.0.23
+        name: mysql
+        env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: test@123
+        ports:
+        - containerPort: 3306
+          name: mysql
+        volumeMounts:
+        - name: mysql-persistent-storage
+          mountPath: /var/lib/mysql
+      volumes:
+      - name: mysql-persistent-storage
+        persistentVolumeClaim:
+          claimName: mysql-pvc
+
+[root@master1 longhorn]# cat mysql_service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-service
+spec:
+  selector:
+    app: mysql
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306
+  type: LoadBalancer  # Use NodePort or ClusterIP depending on your setup
+
+[root@master1 ~]# cd /k8s/storage/longhorn/
+[root@master1 longhorn]# kubectl create -f mysql-pv.yaml
+[root@master1 longhorn]# kubectl create -f mysql-pvc.yaml
+[root@master1 longhorn]# kubectl create -f mysql.yaml
+[root@master1 longhorn]# kubectl create -f mysql_service.yaml
+
+[root@master1 longhorn]# kubectl get pods -w
+
+--if want to scale mysql
+[root@master1 longhorn]# kubectl scale deployment mysql --replicas=3
+deployment.apps/mysql scaled
+[root@master1 longhorn]# kubectl get pod
+[root@master1 longhorn]# kubectl get pod mysql-866b78d7bb-xqj9j -o=jsonpath='{.spec.nodeName}'
+
+[root@master1 longhorn]# kubectl get svc mysql-service
+NAME            TYPE           CLUSTER-IP    EXTERNAL-IP   PORT(S)          AGE
+mysql-service   LoadBalancer   10.111.75.18   <pending>     3306:32433/TCP   8m10s
+
+--install from where you want connected
+[root@master1 longhorn]# dnf install mysql -y
+[root@master1 longhorn]# mysql -h 10.111.75.18 -u root -p
+Enter password: test@123
+mysql>create database ahosan1;
+mysql> show databases;
++--------------------+
+| Database           |
++--------------------+
+| ahosan1            |
+| information_schema |
+| mysql              |
+| performance_schema |
+| sys                |
++--------------------+
+5 rows in set (0.00 sec)
+mysql> exit
+[root@master1 longhorn]#
+
