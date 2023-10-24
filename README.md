@@ -14,6 +14,9 @@ The kubectl and docker utilities should be installed on both the master and work
 
 Essential packages such as git, nfs-utils, iscsi-initiator-utils, and wget must be installed on all nodes.
 
+## For hands-on implement follow this file
+https://github.com/MdAhosanHabib/K8s_LongHorn_MySQL/blob/0a6505bbc7f2c6eb524fc2d6ac72dd5bce983475/longHornMysqlK8s.txt
+
 ## Setting up Additional Disk on Worker Nodes:
 For each worker node, the additional 40GB hard disk should be added and properly formatted. The disk is formatted for storage and subsequently mounted. 
 The relevant /etc/fstab entry ensures automatic mounting upon system startup.
@@ -28,6 +31,7 @@ Monitoring the installation process to verify its completion and checking for an
 ## Configuring Ingress for Longhorn:
 An Ingress is set up to allow access to the Longhorn user interface. The Ingress is configured to route traffic to the Longhorn frontend service. 
 The user interface can be accessed using the assigned IP and port.
+<img width="549" alt="OraToMysql" src="https://github.com/MdAhosanHabib/K8s_LongHorn_MySQL/blob/996bf53857ab14e815508c6640f85c1e0aeb1673/LonghornDashboard.PNG">
 
 ## Setting Up MySQL with Longhorn Storage:
 To provide data persistence for MySQL in the Kubernetes cluster, PersistentVolumeClaims (PVCs) and PersistentVolumes (PVs) are defined and created. 
@@ -35,9 +39,7 @@ MySQL deployments, services, and pods are configured to use these PVCs. These st
 
 ## Accessing MySQL:
 MySQL is accessible through the LoadBalancer service. Clients can connect to MySQL using tools like the MySQL client from anywhere within the network. Data can be manipulated and databases can be created as required.
-
-## For hands-on implement follow this file
-https://github.com/MdAhosanHabib/K8s_LongHorn_MySQL/blob/0a6505bbc7f2c6eb524fc2d6ac72dd5bce983475/longHornMysqlK8s.txt
+<img width="549" alt="OraToMysql" src="https://github.com/MdAhosanHabib/K8s_LongHorn_MySQL/blob/main/LonghornMySQL.PNG">
 
 ## Conclusion:
 This document outlines the essential steps involved in setting up Longhorn storage and deploying MySQL within a Kubernetes cluster. The setup provides data persistence, reliability, and scalability to applications and databases, thereby ensuring smooth operations and seamless scaling within a Kubernetes environment.
